@@ -1,11 +1,14 @@
 # bot.py
 import os
 import uuid
+import asyncio
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from flask import Flask
 from supabase import create_client, Client
 from threading import Thread
+import psutil
+import GPUtil
 
 # ---------------- Render keep_alive ----------------
 app = Flask(__name__)
@@ -71,8 +74,14 @@ class PurchaseModal(discord.ui.Modal):
 
         # Supabase Storage にアップロード
         file_name = os.path.basename(self.file_path)
-        with open(self.file_path, "rb") as f:
-            supabase.storage.from_("purchases").upload(f"{purchase_id}/{file_name}", f, {"cacheControl": "3600", "upsert": True})
+        try:
+            with open(self.file_path, "rb") as f:
+                supabase.storage.from_("purchases").upload(
+                    f"{purchase_id}/{file_name}", f, {"cacheControl": "3600", "upsert": "true"}
+                )
+        except Exception as e:
+            await interaction.followup.send(f"ファイルアップロード失敗: {e}", ephemeral=True)
+            return
 
         # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
@@ -227,17 +236,38 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
 # ---------------- Bot Ready ----------------
 @bot.event
 async def on_ready():
-    # 永続ビューを先に登録
-    bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
+    bot.add_view(PanelButtons(None, None))  # 永続ビュー安全版
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
 
-    # グローバルコマンド同期
     try:
-        await bot.tree.sync()  # guild 指定なし → 全サーバーに同期
+        await bot.tree.sync()
         print("✅ グローバルコマンド同期成功")
     except Exception as e:
         print(f"❌ コマンド同期失敗: {e}")
 
+    update_status.start()
+
+# ---------------- ステータス更新 ----------------
+@tasks.loop(minutes=5)
+async def update_status():
+    try:
+        ping = round(bot.latency * 1000)
+        commands_count = len(bot.tree.get_commands())
+        cpu = psutil.cpu_percent()
+        mem = psutil.virtual_memory().percent
+
+        gpus = GPUtil.getGPUs()
+        if gpus:
+            gpu_usage = gpus[0].load * 100
+            gpu_mem = gpus[0].memoryUtil * 100
+        else:
+            gpu_usage = 0
+            gpu_mem = 0
+
+        status_text = f"{ping}ms ping | synced {commands_count} command | CPU {cpu}%/{mem}% | GPU {gpu_usage:.1f}%/{gpu_mem:.1f}%"
+        await bot.change_presence(activity=discord.Game(status_text))
+    except Exception as e:
+        print("ステータス更新エラー:", e)
 
 # ---------------- Main ----------------
 keep_alive()
