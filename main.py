@@ -1,7 +1,6 @@
 # bot.py
 import os
 import uuid
-import asyncio
 import discord
 from discord.ext import commands, tasks
 from flask import Flask
@@ -56,10 +55,9 @@ class PurchaseModal(discord.ui.Modal):
         self.add_item(self.link)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)  # deferして3秒ルール回避
         link_value = self.link.value.strip()
         if not link_value.startswith("https://pay.paypay.ne.jp/"):
-            await interaction.followup.send("無効なリンクです。", ephemeral=True)
+            await interaction.response.send_message("無効なリンクです。", ephemeral=True)
             return
 
         purchase_id = str(uuid.uuid4())
@@ -73,6 +71,7 @@ class PurchaseModal(discord.ui.Modal):
             "file_path": self.file_path,
         }
 
+        # Supabase Storage にアップロード
         file_name = os.path.basename(self.file_path)
         try:
             with open(self.file_path, "rb") as f:
@@ -83,7 +82,7 @@ class PurchaseModal(discord.ui.Modal):
             await interaction.followup.send(f"ファイルアップロード失敗: {e}", ephemeral=True)
             return
 
-        # DB保存
+        # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
             "id": purchase_id,
             "product": self.product,
@@ -109,11 +108,13 @@ class PurchaseModal(discord.ui.Modal):
         role = self.guild.get_role(ADMIN_NOTIFY_ROLE_ID)
         if role:
             for m in role.members:
-                try: await m.send(embed=embed, view=view); sent += 1
-                except: pass
+                try:
+                    await m.send(embed=embed, view=view)
+                    sent += 1
+                except: 
+                    pass
 
-        await interaction.followup.send(f"管理者へ通知しました（{sent}人）", ephemeral=True)
-
+        await interaction.response.send_message(f"管理者へ通知しました（{sent}人）")
 
 class RejectModal(discord.ui.Modal):
     def __init__(self, pid):
@@ -123,18 +124,15 @@ class RejectModal(discord.ui.Modal):
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
         p = purchases.get(self.pid)
         if not p:
-            await interaction.followup.send("購入情報なし", ephemeral=True)
-            return
+            return await interaction.response.send_message("購入情報なし", ephemeral=True)
         try:
             user = await bot.fetch_user(p["buyer_id"])
             await user.send(f"購入は拒否されました。\n理由:\n{self.reason.value}")
         except: pass
         supabase.table("purchase_logs").update({"status": "rejected", "rejected_reason": self.reason.value}).eq("id", self.pid).execute()
-        await interaction.followup.send("拒否し通知しました。", ephemeral=True)
-
+        await interaction.response.send_message("拒否し通知しました。")
 
 class AdminActionView(discord.ui.View):
     def __init__(self, pid):
@@ -147,11 +145,9 @@ class AdminActionView(discord.ui.View):
 
     @discord.ui.button(label="配達", style=discord.ButtonStyle.success, custom_id="deliver_button")
     async def deliver(self, interaction, _):
-        await interaction.response.defer(ephemeral=True)
         p = purchases.get(self.pid)
         if not p:
-            await interaction.followup.send("情報なし", ephemeral=True)
-            return
+            return await interaction.response.send_message("情報なし")
 
         try:
             buyer = await bot.fetch_user(p["buyer_id"])
@@ -179,8 +175,7 @@ class AdminActionView(discord.ui.View):
             await channel.send(embed=embed)
 
         supabase.table("purchase_logs").update({"status": "delivered"}).eq("id", self.pid).execute()
-        await interaction.followup.send("配達完了しました。", ephemeral=True)
-
+        await interaction.response.send_message("配達完了しました。")
 
 class ProductSelect(discord.ui.Select):
     def __init__(self, buyer, guild, file3, file22):
@@ -195,20 +190,15 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction):
-        await interaction.response.defer(ephemeral=True)
         if self.values[0].startswith("小学生"):
-            await interaction.followup.send(view=ProductSelectView(self.buyer, self.guild, self.file3, self.file22), ephemeral=True)
-            await interaction.followup.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
+            await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
         else:
-            await interaction.followup.send(view=ProductSelectView(self.buyer, self.guild, self.file3, self.file22), ephemeral=True)
-            await interaction.followup.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
-
+            await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
 
 class ProductSelectView(discord.ui.View):
     def __init__(self, user, guild, file3, file22):
         super().__init__(timeout=None)
         self.add_item(ProductSelect(user, guild, file3, file22))
-
 
 class PanelButtons(discord.ui.View):
     def __init__(self, file3, file22):
@@ -218,22 +208,18 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
     async def buy(self, interaction, _):
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22), ephemeral=True)
+        await interaction.response.send_modal(ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22))
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
-        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(title="在庫確認", color=0xFFFFFF)
         embed.add_field(name="小学生 (3個)", value="価格: `¥300` | 在庫数: ∞")
         embed.add_field(name="詰め合わせパック(22個)", value="価格: `¥900` | 在庫数: ∞")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
+        await interaction.response.send_message(embed=embed)
 
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    await interaction.response.defer(ephemeral=True)
     path3 = os.path.join(DATA_DIR, file3.filename)
     path22 = os.path.join(DATA_DIR, file22.filename)
     await file3.save(path3)
@@ -244,23 +230,19 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
     embed.set_footer(text="<@1434213209795199006> からのDMを許可してください")
     embed.add_field(name="小学生 (3個)", value="値段: 300円")
     embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
-    await interaction.followup.send(embed=embed, view=PanelButtons(path3, path22), ephemeral=False)
-
+    await interaction.response.send_message(embed=embed, view=PanelButtons(path3, path22))
 
 # ---------------- Bot Ready ----------------
 @bot.event
 async def on_ready():
-    bot.add_view(PanelButtons(None, None))  # 永続ビュー安全版
+    bot.add_view(PanelButtons(None, None))  # 永続ビュー
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
-
     try:
         await bot.tree.sync()
         print("✅ グローバルコマンド同期成功")
     except Exception as e:
         print(f"❌ コマンド同期失敗: {e}")
-
     update_status.start()
-
 
 # ---------------- ステータス更新 ----------------
 @tasks.loop(minutes=5)
@@ -270,7 +252,6 @@ async def update_status():
         commands_count = len(bot.tree.get_commands())
         cpu = psutil.cpu_percent()
         mem = psutil.virtual_memory().percent
-
         gpus = GPUtil.getGPUs()
         if gpus:
             gpu_usage = gpus[0].load * 100
@@ -278,12 +259,10 @@ async def update_status():
         else:
             gpu_usage = 0
             gpu_mem = 0
-
         status_text = f"{ping}ms ping | synced {commands_count} command | CPU {cpu}%/{mem}% | GPU {gpu_usage:.1f}%/{gpu_mem:.1f}%"
         await bot.change_presence(activity=discord.Game(status_text))
     except Exception as e:
         print("ステータス更新エラー:", e)
-
 
 # ---------------- Main ----------------
 keep_alive()
