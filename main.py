@@ -177,6 +177,7 @@ class AdminActionView(discord.ui.View):
         supabase.table("purchase_logs").update({"status": "delivered"}).eq("id", self.pid).execute()
         await interaction.response.send_message("配達完了しました。")
 
+# ---------------- ProductSelect & View ----------------
 class ProductSelect(discord.ui.Select):
     def __init__(self, buyer, guild, file3, file22):
         options = [
@@ -189,17 +190,22 @@ class ProductSelect(discord.ui.Select):
         self.file3 = file3
         self.file22 = file22
 
-    async def callback(self, interaction):
+    async def callback(self, interaction: discord.Interaction):
         if self.values[0].startswith("小学生"):
-            await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
+            await interaction.response.send_modal(
+                PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3)
+            )
         else:
-            await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
+            await interaction.response.send_modal(
+                PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22)
+            )
 
 class ProductSelectView(discord.ui.View):
     def __init__(self, user, guild, file3, file22):
         super().__init__(timeout=None)
         self.add_item(ProductSelect(user, guild, file3, file22))
 
+# ---------------- PanelButtons ----------------
 class PanelButtons(discord.ui.View):
     def __init__(self, file3, file22):
         super().__init__(timeout=None)
@@ -208,14 +214,17 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
     async def buy(self, interaction, _):
-        await interaction.response.send_modal(ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22))
+        await interaction.response.send_message(
+            view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
+            ephemeral=True
+        )
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
         embed = discord.Embed(title="在庫確認", color=0xFFFFFF)
         embed.add_field(name="小学生 (3個)", value="価格: `¥300` | 在庫数: ∞")
         embed.add_field(name="詰め合わせパック(22個)", value="価格: `¥900` | 在庫数: ∞")
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
