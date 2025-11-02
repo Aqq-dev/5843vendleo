@@ -1,5 +1,6 @@
 # bot.py
 import os
+import uuid
 import discord
 from discord.ext import commands, tasks
 from flask import Flask
@@ -68,7 +69,7 @@ class PurchaseModal(discord.ui.Modal):
             await interaction.followup.send("無効なリンクです。", ephemeral=True)
             return
 
-        purchase_id = self.buyer.id  # 簡略化のため ID で管理
+        purchase_id = str(uuid.uuid4())
         purchases[purchase_id] = {
             "product": self.product,
             "price": self.price,
@@ -81,7 +82,7 @@ class PurchaseModal(discord.ui.Modal):
 
         # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
-            "id": str(purchase_id),
+            "id": purchase_id,
             "product": self.product,
             "price": self.price,
             "buyer_id": str(self.buyer.id),
@@ -231,7 +232,6 @@ async def vd_panel(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     bot.add_view(PanelButtons())  # 永続ビュー
-    bot.add_view(PersistentPanelButtons())
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
     try:
         await bot.tree.sync()
