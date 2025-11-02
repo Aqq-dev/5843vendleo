@@ -197,7 +197,6 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        # ephemeral モーダルで購入希望を出す
         await interaction.response.send_modal(
             PurchaseModal(
                 "小学生 (3個)" if self.values[0].startswith("小学生") else "詰め合わせパック(22個)",
@@ -221,6 +220,7 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
     async def buy(self, interaction, _):
+        # セレクトメニューは個人にだけ表示
         await interaction.response.send_message(
             view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
             ephemeral=True
@@ -228,6 +228,7 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
+        # 在庫確認も個人に表示
         await interaction.response.send_message(
             embed=discord.Embed(
                 title="在庫確認",
@@ -240,7 +241,8 @@ class PanelButtons(discord.ui.View):
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    await interaction.response.defer(ephemeral=True)
+    # パネル自体はサーバー上に表示（ephemeral=False）
+    await interaction.response.defer(ephemeral=False)
     path3 = os.path.join(DATA_DIR, file3.filename)
     path22 = os.path.join(DATA_DIR, file22.filename)
     await file3.save(path3)
@@ -252,7 +254,7 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
     embed.add_field(name="小学生 (3個)", value="値段: 300円")
     embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
 
-    await interaction.followup.send(embed=embed, view=PanelButtons(path3, path22))
+    await interaction.followup.send(embed=embed, view=PanelButtons(path3, path22), ephemeral=False)
 
 # ---------------- Bot Ready ----------------
 @bot.event
