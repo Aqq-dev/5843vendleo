@@ -1,6 +1,7 @@
 # bot.py
 import os
 import uuid
+import zipfile
 import discord
 from discord.ext import commands, tasks
 from flask import Flask
@@ -44,17 +45,19 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 purchases = {}
 DATA_DIR = "data"
+ZIP_DIR = "zips"
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(ZIP_DIR, exist_ok=True)
 
 # ---------------- UI Classes ----------------
 class PurchaseModal(discord.ui.Modal):
-    def __init__(self, product, price, buyer, guild, file_path):
+    def __init__(self, product, price, buyer, guild, file_paths):
         super().__init__(title="PayPayリンク確認")
         self.product = product
         self.price = price
         self.buyer = buyer
         self.guild = guild
-        self.file_path = file_path
+        self.file_paths = file_paths
         self.link = discord.ui.TextInput(label="PayPayリンク", placeholder="https://pay.paypay.ne.jp/...", required=True)
         self.add_item(self.link)
 
@@ -66,6 +69,12 @@ class PurchaseModal(discord.ui.Modal):
             return
 
         purchase_id = str(uuid.uuid4())
+        zip_name = f"{purchase_id}.zip"
+        zip_path = os.path.join(ZIP_DIR, zip_name)
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for fpath in self.file_paths:
+                zipf.write(fpath, os.path.basename(fpath))
+
         purchases[purchase_id] = {
             "product": self.product,
             "price": self.price,
@@ -73,22 +82,9 @@ class PurchaseModal(discord.ui.Modal):
             "buyer_name": str(self.buyer),
             "guild_id": str(self.guild.id),
             "guild_name": self.guild.name,
-            "file_path": self.file_path,
+            "zip_path": zip_path,
             "status": "pending",
         }
-
-        # Supabase Storage にアップロード
-        file_name = None
-        if self.file_path:
-            file_name = os.path.basename(self.file_path)
-            try:
-                with open(self.file_path, "rb") as f:
-                    supabase.storage.from_("purchases").upload(
-                        f"{purchase_id}/{file_name}", f, {"cacheControl": "3600", "upsert": "true"}
-                    )
-            except Exception as e:
-                await interaction.followup.send(f"ファイルアップロード失敗: {e}", ephemeral=True)
-                return
 
         # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
@@ -99,7 +95,7 @@ class PurchaseModal(discord.ui.Modal):
             "buyer_name": str(self.buyer),
             "guild_id": str(self.guild.id),
             "guild_name": self.guild.name,
-            "file_name": file_name,
+            "file_name": zip_name,
             "paypay_link": link_value,
             "status": "pending"
         }).execute()
@@ -161,13 +157,10 @@ class AdminActionView(discord.ui.View):
         p["status"] = "delivered"
         try:
             buyer = await bot.fetch_user(p["buyer_id"])
-            if p["file_path"]:
-                await buyer.send(
-                    f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1\n以下をお受け取りください:",
-                    file=discord.File(p["file_path"])
-                )
-            else:
-                await buyer.send(f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1")
+            await buyer.send(
+                f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1\n以下をお受け取りください:",
+                file=discord.File(p["zip_path"])
+            )
         except: pass
 
         guild = bot.get_guild(int(p["guild_id"]))
@@ -204,13 +197,13 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        # ephemeral にしてユーザー側に商品を直接送らない
+        # ephemeral モーダルで購入希望を出す
         await interaction.response.send_modal(
             PurchaseModal(
                 "小学生 (3個)" if self.values[0].startswith("小学生") else "詰め合わせパック(22個)",
                 "300円" if self.values[0].startswith("小学生") else "900円",
                 self.buyer, self.guild,
-                self.file3 if self.values[0].startswith("小学生") else self.file22
+                [self.file3] if self.values[0].startswith("小学生") else [self.file22]
             )
         )
 
@@ -247,7 +240,6 @@ class PanelButtons(discord.ui.View):
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    # interaction を即座に defer してエラー防止
     await interaction.response.defer(ephemeral=True)
     path3 = os.path.join(DATA_DIR, file3.filename)
     path22 = os.path.join(DATA_DIR, file22.filename)
