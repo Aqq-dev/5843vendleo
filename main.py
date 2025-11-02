@@ -9,7 +9,7 @@ from threading import Thread
 import psutil
 import GPUtil
 
-# ---------------- Render keep_alive ----------------
+# ---------------- keep_alive ----------------
 app = Flask(__name__)
 @app.route("/")
 def home():
@@ -80,7 +80,6 @@ class PurchaseModal(discord.ui.Modal):
             "status": "pending",
         }
 
-        # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
             "id": purchase_id,
             "product": self.product,
@@ -93,8 +92,10 @@ class PurchaseModal(discord.ui.Modal):
             "status": "pending"
         }).execute()
 
-        # 管理者通知
-        embed = discord.Embed(title=f"{self.product} の購入希望が届きました", color=0xFFFFFF)
+        embed = discord.Embed(
+            title=f"{self.product} の購入希望が届きました",
+            color=0xFFFFFF
+        )
         embed.add_field(name="金額", value=self.price, inline=False)
         embed.add_field(name="購入者", value=f"<@{self.buyer.id}> ({self.buyer.id}) {self.buyer}", inline=False)
         embed.add_field(name="PayPayリンク", value=link_value, inline=False)
@@ -176,7 +177,7 @@ class AdminActionView(discord.ui.View):
         supabase.table("purchase_logs").update({"status": "delivered"}).eq("id", self.pid).execute()
         await interaction.response.send_message("配達完了しました。", ephemeral=True)
 
-# ---------------- ProductSelect & View ----------------
+# ---------------- ProductSelect ----------------
 class ProductSelect(discord.ui.Select):
     def __init__(self, buyer, guild):
         options = [
@@ -221,12 +222,13 @@ class PanelButtons(discord.ui.View):
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction):
+    await interaction.response.defer()
     embed = discord.Embed(title="🔞｜PAYPAY半自販機", description="下記ボタンを押して購入してください", color=0xFFFFFF)
     embed.set_author(name="半自販機パネル", icon_url=AUTHOR_ICON_URL)
     embed.set_footer(text="Cats Shop bot v3 からのDMを許可してください")
     embed.add_field(name="小学生 (3個)", value="値段: 300円")
     embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
-    await interaction.response.send_message(embed=embed, view=PanelButtons(), ephemeral=False)
+    await interaction.followup.send(embed=embed, view=PanelButtons(), ephemeral=False)
 
 # ---------------- Bot Ready ----------------
 @bot.event
