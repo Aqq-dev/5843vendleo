@@ -227,16 +227,17 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
 # ---------------- Bot Ready ----------------
 @bot.event
 async def on_ready():
+    # 永続ビューを先に登録
     bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
-    # コマンド同期
+
+    # グローバルコマンド同期
     try:
-        guild_id = 1313077923741438004  # テストサーバーID
-        guild = discord.Object(id=guild_id)
-        await bot.tree.sync(guild=guild)
-        print("✅ コマンド同期成功")
+        await bot.tree.sync()  # guild 指定なし → 全サーバーに同期
+        print("✅ グローバルコマンド同期成功")
     except Exception as e:
         print(f"❌ コマンド同期失敗: {e}")
+
 
 # ---------------- Main ----------------
 keep_alive()
