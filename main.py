@@ -1,6 +1,7 @@
 # bot.py
 import os
 import uuid
+import json
 import discord
 from discord.ext import commands, tasks
 from flask import Flask
@@ -73,33 +74,13 @@ class PurchaseModal(discord.ui.Modal):
             "guild_id": str(self.guild.id),
             "guild_name": self.guild.name,
             "file_path": self.file_path,
+            "paypay_link": link_value
         }
 
-        # Supabase Storage にアップロード
-        file_name = None
-        if self.file_path:
-            file_name = os.path.basename(self.file_path)
-            try:
-                with open(self.file_path, "rb") as f:
-                    supabase.storage.from_("purchases").upload(
-                        f"{purchase_id}/{file_name}", f, {"cacheControl": "3600", "upsert": "true"}
-                    )
-            except Exception as e:
-                await interaction.response.send_message(f"ファイルアップロード失敗: {e}", ephemeral=True)
-                return
-
-        # Supabase DB に購入履歴保存
-        supabase.table("purchase_logs").insert({
-            "id": purchase_id,
-            "product": self.product,
-            "price": self.price,
-            "buyer_id": str(self.buyer.id),
-            "buyer_name": str(self.buyer),
-            "guild_id": str(self.guild.id),
-            "guild_name": self.guild.name,
-            "file_name": file_name,
-            "paypay_link": link_value
-        }).execute()
+        # 購入情報をローカルに保存（SupabaseはUUID.txtにJSON形式）
+        purchase_txt = os.path.join(DATA_DIR, f"{purchase_id}.txt")
+        with open(purchase_txt, "w", encoding="utf-8") as f:
+            json.dump(purchases[purchase_id], f, ensure_ascii=False, indent=2)
 
         # 管理者通知
         embed = discord.Embed(title=f"{self.product} の購入希望が届きました", color=0xFFFFFF)
@@ -136,9 +117,7 @@ class RejectModal(discord.ui.Modal):
         try:
             user = await bot.fetch_user(p["buyer_id"])
             await user.send(f"購入は拒否されました。\n理由:\n{self.reason.value}")
-        except: 
-            pass
-        supabase.table("purchase_logs").update({"status": "rejected", "rejected_reason": self.reason.value}).eq("id", self.pid).execute()
+        except: pass
         await interaction.response.send_message("拒否し通知しました。", ephemeral=True)
 
 class AdminActionView(discord.ui.View):
@@ -146,11 +125,11 @@ class AdminActionView(discord.ui.View):
         super().__init__(timeout=None)
         self.pid = pid
 
-    @discord.ui.button(label="拒否", style=discord.ButtonStyle.danger, custom_id="reject_button")
+    @discord.ui.button(label="拒否", style=discord.ButtonStyle.danger)
     async def reject(self, interaction, _):
         await interaction.response.send_modal(RejectModal(self.pid))
 
-    @discord.ui.button(label="配達", style=discord.ButtonStyle.success, custom_id="deliver_button")
+    @discord.ui.button(label="配達", style=discord.ButtonStyle.success)
     async def deliver(self, interaction, _):
         p = purchases.get(self.pid)
         if not p:
@@ -165,8 +144,7 @@ class AdminActionView(discord.ui.View):
                 )
             else:
                 await buyer.send(f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1")
-        except: 
-            pass
+        except: pass
 
         guild = bot.get_guild(int(p["guild_id"]))
         role = guild.get_role(DELIVERY_LOG_ROLE_ID) if guild else None
@@ -185,7 +163,7 @@ class AdminActionView(discord.ui.View):
             embed.add_field(name="購入サーバー", value=f"{p['guild_name']} ({p['guild_id']})")
             await channel.send(embed=embed)
 
-        await interaction.response.send_message("配達完了しました。", ephemeral=True)
+        await interaction.response.send_message("配達完了しました。")
 
 # ---------------- ProductSelect & View ----------------
 class ProductSelect(discord.ui.Select):
@@ -194,18 +172,17 @@ class ProductSelect(discord.ui.Select):
             discord.SelectOption(label="小学生 (3個)", description="値段: 300円"),
             discord.SelectOption(label="詰め合わせパック(22個)", description="値段: 900円"),
         ]
-        super().__init__(options=options, placeholder="商品を選択してください", custom_id="product_select")
+        super().__init__(options=options, placeholder="商品を選択してください")
         self.buyer = buyer
         self.guild = guild
         self.file3 = file3
         self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        if not interaction.response.is_done():
-            if self.values[0].startswith("小学生"):
-                await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
-            else:
-                await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
+        if self.values[0].startswith("小学生"):
+            await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
+        else:
+            await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
 
 class ProductSelectView(discord.ui.View):
     def __init__(self, user, guild, file3, file22):
@@ -219,30 +196,22 @@ class PanelButtons(discord.ui.View):
         self.file3 = file3
         self.file22 = file22
 
-    @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
+    @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success)
     async def buy(self, interaction, _):
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
-                ephemeral=True
-            )
+        await interaction.response.send_message(
+            view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
+        )
 
-    @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
+    @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary)
     async def stock(self, interaction, _):
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="在庫確認",
-                    description="小学生 (3個) : ¥300 | 在庫 ∞\n詰め合わせパック(22個) : ¥900 | 在庫 ∞",
-                    color=0xFFFFFF
-                ),
-                ephemeral=True
-            )
+        embed = discord.Embed(title="在庫確認", color=0xFFFFFF)
+        embed.add_field(name="小学生 (3個)", value="価格: ¥300 | 在庫: ∞")
+        embed.add_field(name="詰め合わせパック(22個)", value="価格: ¥900 | 在庫: ∞")
+        await interaction.response.send_message(embed=embed)
 
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    await interaction.response.defer(ephemeral=True)
     path3 = os.path.join(DATA_DIR, file3.filename)
     path22 = os.path.join(DATA_DIR, file22.filename)
     await file3.save(path3)
@@ -254,7 +223,7 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
     embed.add_field(name="小学生 (3個)", value="値段: 300円")
     embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
 
-    await interaction.followup.send(embed=embed, view=PanelButtons(path3, path22))
+    await interaction.response.send_message(embed=embed, view=PanelButtons(path3, path22))
 
 # ---------------- Bot Ready ----------------
 @bot.event
@@ -283,7 +252,7 @@ async def update_status():
         else:
             gpu_usage = 0
             gpu_mem = 0
-        status_text = f"{ping}ms ping | synced {commands_count} command | CPU {cpu}%/{mem}% | GPU {gpu_usage:.1f}%/{gpu_mem:.1f}%"
+        status_text = f"{ping}ms ping | {commands_count} command | CPU {cpu}%/{mem}% | GPU {gpu_usage:.1f}%/{gpu_mem:.1f}%"
         await bot.change_presence(activity=discord.Game(status_text))
     except Exception as e:
         print("ステータス更新エラー:", e)
