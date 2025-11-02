@@ -231,20 +231,26 @@ class VdPanel(commands.Cog):
         embed.add_field(name="詰め合わせパック(22個)", value="```値段: 900円```")
         await interaction.response.send_message(embed=embed, view=PanelButtons(path3, path22))
 
-# ---------------- Bot Ready ----------------
-@bot.event
-async def on_ready():
-    # 永続ビューを先に登録
-    bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
+async def main():
+    async with bot:
+        # Cog 登録
+        await bot.add_cog(VdPanel(bot))
 
-    # テスト用ならギルドIDを指定して同期
-    guild_id = 1313077923741438004  # テストサーバーIDに置き換え
-    guild = discord.Object(id=guild_id)
-    await bot.tree.sync(guild=guild)  # ギルド単位で即時反映
-    print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
+        # 永続ビュー登録
+        bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
 
+        # ギルド同期（テスト用）
+        guild_id = 1313077923741438004
+        guild = discord.Object(id=guild_id)
+        await bot.tree.sync(guild=guild)
+        print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
 
-# ---------------- Main ----------------
+        # Bot 起動
+        await bot.start(BOT_TOKEN)
+
+# keep_alive は Render 用
 keep_alive()
-bot.add_cog(VdPanel(bot))
-bot.run(BOT_TOKEN)
+
+import asyncio
+asyncio.run(main())
+
