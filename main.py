@@ -1,7 +1,5 @@
 # bot.py
 import os
-import uuid
-import zipfile
 import discord
 from discord.ext import commands, tasks
 from flask import Flask
@@ -44,20 +42,22 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 purchases = {}
-DATA_DIR = "data"
-ZIP_DIR = "zips"
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(ZIP_DIR, exist_ok=True)
+
+# ---------------- 商品 URL ----------------
+PRODUCT_URLS = {
+    "小学生 (3個)": "https://d.kuku.lu/ktv8jrenu",
+    "詰め合わせパック(22個)": "https://d.kuku.lu/5hu4fvh47"
+}
+DOWNLOAD_PASSWORD = "catsshopr288881ebeh3passkey"
 
 # ---------------- UI Classes ----------------
 class PurchaseModal(discord.ui.Modal):
-    def __init__(self, product, price, buyer, guild, file_paths):
+    def __init__(self, product, price, buyer, guild):
         super().__init__(title="PayPayリンク確認")
         self.product = product
         self.price = price
         self.buyer = buyer
         self.guild = guild
-        self.file_paths = file_paths
         self.link = discord.ui.TextInput(label="PayPayリンク", placeholder="https://pay.paypay.ne.jp/...", required=True)
         self.add_item(self.link)
 
@@ -68,13 +68,7 @@ class PurchaseModal(discord.ui.Modal):
             await interaction.followup.send("無効なリンクです。", ephemeral=True)
             return
 
-        purchase_id = str(uuid.uuid4())
-        zip_name = f"{purchase_id}.zip"
-        zip_path = os.path.join(ZIP_DIR, zip_name)
-        with zipfile.ZipFile(zip_path, "w") as zipf:
-            for fpath in self.file_paths:
-                zipf.write(fpath, os.path.basename(fpath))
-
+        purchase_id = self.buyer.id  # 簡略化のため ID で管理
         purchases[purchase_id] = {
             "product": self.product,
             "price": self.price,
@@ -82,20 +76,18 @@ class PurchaseModal(discord.ui.Modal):
             "buyer_name": str(self.buyer),
             "guild_id": str(self.guild.id),
             "guild_name": self.guild.name,
-            "zip_path": zip_path,
             "status": "pending",
         }
 
         # Supabase DB に購入履歴保存
         supabase.table("purchase_logs").insert({
-            "id": purchase_id,
+            "id": str(purchase_id),
             "product": self.product,
             "price": self.price,
             "buyer_id": str(self.buyer.id),
             "buyer_name": str(self.buyer),
             "guild_id": str(self.guild.id),
             "guild_name": self.guild.name,
-            "file_name": zip_name,
             "paypay_link": link_value,
             "status": "pending"
         }).execute()
@@ -158,8 +150,8 @@ class AdminActionView(discord.ui.View):
         try:
             buyer = await bot.fetch_user(p["buyer_id"])
             await buyer.send(
-                f"ご購入ありがとうございます！\n商品: {p['product']}\n商品説明: __転売は禁止です！__\n数量: 1\n以下をお受け取りください:",
-                file=discord.File(p["zip_path"])
+                f"ご購入ありがとうございます！\n商品: {p['product']}\n商品説明: __転売は禁止です！__\n数量: 1\n"
+                f"ダウンロードURL: {PRODUCT_URLS[p['product']]}\nパスワード: {DOWNLOAD_PASSWORD}"
             )
         except: pass
 
@@ -185,7 +177,7 @@ class AdminActionView(discord.ui.View):
 
 # ---------------- ProductSelect & View ----------------
 class ProductSelect(discord.ui.Select):
-    def __init__(self, buyer, guild, file3, file22):
+    def __init__(self, buyer, guild):
         options = [
             discord.SelectOption(label="小学生 (3個)", description="値段: 300円"),
             discord.SelectOption(label="詰め合わせパック(22個)", description="値段: 900円"),
@@ -193,45 +185,30 @@ class ProductSelect(discord.ui.Select):
         super().__init__(options=options, placeholder="商品を選択してください", custom_id="product_select")
         self.buyer = buyer
         self.guild = guild
-        self.file3 = file3
-        self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(
-            view=PurchaseModal(
+        await interaction.response.send_modal(
+            PurchaseModal(
                 "小学生 (3個)" if self.values[0].startswith("小学生") else "詰め合わせパック(22個)",
                 "300円" if self.values[0].startswith("小学生") else "900円",
-                self.buyer, self.guild,
-                [self.file3] if self.values[0].startswith("小学生") else [self.file22]
-            ),
-            ephemeral=True
+                self.buyer, self.guild
+            )
         )
 
 class ProductSelectView(discord.ui.View):
-    def __init__(self, user, guild, file3, file22):
+    def __init__(self, user, guild):
         super().__init__(timeout=None)
-        self.add_item(ProductSelect(user, guild, file3, file22))
+        self.add_item(ProductSelect(user, guild))
 
 # ---------------- PanelButtons ----------------
 class PanelButtons(discord.ui.View):
-    def __init__(self, file3=None, file22=None):
-        super().__init__(timeout=None)
-        self.file3 = file3
-        self.file22 = file22
-
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
     async def buy(self, interaction, _):
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(
-            view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
-            ephemeral=True
-        )
+        await interaction.response.send_message(view=ProductSelectView(interaction.user, interaction.guild), ephemeral=True)
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(
+        await interaction.response.send_message(
             embed=discord.Embed(
                 title="在庫確認",
                 description="小学生 (3個) : ¥300 | 在庫 ∞\n詰め合わせパック(22個) : ¥900 | 在庫 ∞",
@@ -242,20 +219,13 @@ class PanelButtons(discord.ui.View):
 
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
-async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    await interaction.response.defer(ephemeral=False)
-    path3 = os.path.join(DATA_DIR, file3.filename)
-    path22 = os.path.join(DATA_DIR, file22.filename)
-    await file3.save(path3)
-    await file22.save(path22)
-
+async def vd_panel(interaction: discord.Interaction):
     embed = discord.Embed(title="🔞｜PAYPAY半自販機", description="下記ボタンを押して購入してください", color=0xFFFFFF)
     embed.set_author(name="半自販機パネル", icon_url=AUTHOR_ICON_URL)
     embed.set_footer(text="Cats Shop bot v3 からのDMを許可してください")
     embed.add_field(name="小学生 (3個)", value="値段: 300円")
     embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
-
-    await interaction.followup.send(embed=embed, view=PanelButtons(path3, path22), ephemeral=False)
+    await interaction.response.send_message(embed=embed, view=PanelButtons(), ephemeral=False)
 
 # ---------------- Bot Ready ----------------
 @bot.event
