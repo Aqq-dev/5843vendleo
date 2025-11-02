@@ -158,7 +158,7 @@ class AdminActionView(discord.ui.View):
         try:
             buyer = await bot.fetch_user(p["buyer_id"])
             await buyer.send(
-                f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1\n以下をお受け取りください:",
+                f"ご購入ありがとうございます！\n商品: {p['product']}\n商品説明: __転売は禁止です！__\n数量: 1\n以下をお受け取りください:",
                 file=discord.File(p["zip_path"])
             )
         except: pass
