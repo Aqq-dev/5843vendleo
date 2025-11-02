@@ -47,79 +47,7 @@ purchases = {}
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---------------- UI Classes ----------------
-class PurchaseModal(discord.ui.Modal):
-    def __init__(self, product, price, buyer, guild, file_path):
-        super().__init__(title="PayPayリンク確認")
-        self.product = product
-        self.price = price
-        self.buyer = buyer
-        self.guild = guild
-        self.file_path = file_path
-        self.link = discord.ui.TextInput(label="PayPayリンク", placeholder="https://pay.paypay.ne.jp/...", required=True)
-        self.add_item(self.link)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        link_value = self.link.value.strip()
-        if not link_value.startswith("https://pay.paypay.ne.jp/"):
-            await interaction.response.send_message("無効なリンクです。", ephemeral=True)
-            return
-
-        purchase_id = str(uuid.uuid4())
-        purchases[purchase_id] = {
-            "product": self.product,
-            "price": self.price,
-            "buyer_id": str(self.buyer.id),
-            "buyer_name": str(self.buyer),
-            "guild_id": str(self.guild.id),
-            "guild_name": self.guild.name,
-            "file_path": self.file_path,
-            "paypay_link": link_value
-        }
-
-        # 購入情報をローカルに保存（SupabaseはUUID.txtにJSON形式）
-        purchase_txt = os.path.join(DATA_DIR, f"{purchase_id}.txt")
-        with open(purchase_txt, "w", encoding="utf-8") as f:
-            json.dump(purchases[purchase_id], f, ensure_ascii=False, indent=2)
-
-        # 管理者通知
-        embed = discord.Embed(title=f"{self.product} の購入希望が届きました", color=0xFFFFFF)
-        embed.add_field(name="金額", value=self.price, inline=False)
-        embed.add_field(name="購入者", value=f"<@{self.buyer.id}> ({self.buyer.id}) {self.buyer}", inline=False)
-        embed.add_field(name="PayPayリンク", value=link_value, inline=False)
-        embed.set_footer(text="支払いを確認したら配達ボタンを押してください")
-        embed.set_author(name="半自販機パネル", icon_url=AUTHOR_ICON_URL)
-
-        view = AdminActionView(purchase_id)
-        sent = 0
-        role = self.guild.get_role(ADMIN_NOTIFY_ROLE_ID)
-        if role:
-            for m in role.members:
-                try:
-                    await m.send(embed=embed, view=view)
-                    sent += 1
-                except: 
-                    continue
-
-        await interaction.response.send_message(f"管理者へ通知しました（{sent}人）", ephemeral=True)
-
-class RejectModal(discord.ui.Modal):
-    def __init__(self, pid):
-        super().__init__(title="拒否理由")
-        self.pid = pid
-        self.reason = discord.ui.TextInput(label="理由", style=discord.TextStyle.long)
-        self.add_item(self.reason)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        p = purchases.get(self.pid)
-        if not p:
-            return await interaction.response.send_message("購入情報なし", ephemeral=True)
-        try:
-            user = await bot.fetch_user(p["buyer_id"])
-            await user.send(f"購入は拒否されました。\n理由:\n{self.reason.value}")
-        except: pass
-        await interaction.response.send_message("拒否し通知しました。", ephemeral=True)
-
+# ---------------- Admin DM 操作 ----------------
 class AdminActionView(discord.ui.View):
     def __init__(self, pid):
         super().__init__(timeout=None)
@@ -127,45 +55,33 @@ class AdminActionView(discord.ui.View):
 
     @discord.ui.button(label="拒否", style=discord.ButtonStyle.danger)
     async def reject(self, interaction, _):
-        await interaction.response.send_modal(RejectModal(self.pid))
+        p = purchases.get(self.pid)
+        if not p:
+            return await interaction.response.send_message("購入情報なし", ephemeral=True)
+        try:
+            user = await bot.fetch_user(p["buyer_id"])
+            await user.send(f"購入は拒否されました。")
+        except: pass
+        await interaction.response.send_message("拒否通知完了", ephemeral=True)
 
     @discord.ui.button(label="配達", style=discord.ButtonStyle.success)
     async def deliver(self, interaction, _):
         p = purchases.get(self.pid)
         if not p:
             return await interaction.response.send_message("情報なし", ephemeral=True)
-
         try:
             buyer = await bot.fetch_user(p["buyer_id"])
             if p["file_path"]:
                 await buyer.send(
-                    f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1\n以下をお受け取りください:",
+                    f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1",
                     file=discord.File(p["file_path"])
                 )
             else:
                 await buyer.send(f"ご購入ありがとうございます！\n商品: {p['product']}\n数量: 1")
         except: pass
+        await interaction.response.send_message("配達完了しました。", ephemeral=True)
 
-        guild = bot.get_guild(int(p["guild_id"]))
-        role = guild.get_role(DELIVERY_LOG_ROLE_ID) if guild else None
-        log = f"配達完了\n商品: {p['product']}\n購入者: {p['buyer_name']} ({p['buyer_id']})\nサーバー: {p['guild_name']} ({p['guild_id']})"
-        if role:
-            for m in role.members:
-                try: await m.send(log)
-                except: pass
-
-        channel = bot.get_channel(PURCHASE_LOG_CHANNEL_ID)
-        if channel:
-            embed = discord.Embed(title="💹｜販売ログ", color=0xFFFFFF)
-            embed.add_field(name="商品名", value=p['product'])
-            embed.add_field(name="購入数", value="1個")
-            embed.add_field(name="購入者", value=f"<@{p['buyer_id']}> ({p['buyer_id']})")
-            embed.add_field(name="購入サーバー", value=f"{p['guild_name']} ({p['guild_id']})")
-            await channel.send(embed=embed)
-
-        await interaction.response.send_message("配達完了しました。")
-
-# ---------------- ProductSelect & View ----------------
+# ---------------- 商品セレクト ----------------
 class ProductSelect(discord.ui.Select):
     def __init__(self, buyer, guild, file3, file22):
         options = [
@@ -179,17 +95,50 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        if self.values[0].startswith("小学生"):
-            await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
+        selected = self.values[0]
+        if selected.startswith("小学生"):
+            product = "小学生 (3個)"
+            price = "300円"
+            file_path = self.file3
         else:
-            await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
+            product = "詰め合わせパック(22個)"
+            price = "900円"
+            file_path = self.file22
+
+        purchase_id = str(uuid.uuid4())
+        purchases[purchase_id] = {
+            "product": product,
+            "price": price,
+            "buyer_id": str(self.buyer.id),
+            "buyer_name": str(self.buyer),
+            "guild_id": str(self.guild.id),
+            "guild_name": self.guild.name,
+            "file_path": file_path,
+        }
+
+        # ローカル保存
+        purchase_txt = os.path.join(DATA_DIR, f"{purchase_id}.txt")
+        with open(purchase_txt, "w", encoding="utf-8") as f:
+            json.dump(purchases[purchase_id], f, ensure_ascii=False, indent=2)
+
+        # 管理者 DM に配達ボタン
+        role = self.guild.get_role(ADMIN_NOTIFY_ROLE_ID)
+        if role:
+            for m in role.members:
+                try:
+                    embed = discord.Embed(title=f"{product} の購入希望", color=0xFFFFFF)
+                    embed.add_field(name="購入者", value=f"{self.buyer} ({self.buyer.id})")
+                    await m.send(embed=embed, view=AdminActionView(purchase_id))
+                except: pass
+
+        await interaction.response.send_message("管理者に通知しました。商品は管理者が配達ボタンを押すまで届きません。", ephemeral=True)
 
 class ProductSelectView(discord.ui.View):
-    def __init__(self, user, guild, file3, file22):
+    def __init__(self, buyer, guild, file3, file22):
         super().__init__(timeout=None)
-        self.add_item(ProductSelect(user, guild, file3, file22))
+        self.add_item(ProductSelect(buyer, guild, file3, file22))
 
-# ---------------- PanelButtons ----------------
+# ---------------- パネル ----------------
 class PanelButtons(discord.ui.View):
     def __init__(self, file3=None, file22=None):
         super().__init__(timeout=None)
@@ -198,9 +147,7 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success)
     async def buy(self, interaction, _):
-        await interaction.response.send_message(
-            view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
-        )
+        await interaction.response.send_message(view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22))
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary)
     async def stock(self, interaction, _):
@@ -209,7 +156,7 @@ class PanelButtons(discord.ui.View):
         embed.add_field(name="詰め合わせパック(22個)", value="価格: ¥900 | 在庫: ∞")
         await interaction.response.send_message(embed=embed)
 
-# ---------------- bot.tree.command ----------------
+# ---------------- /vd-panel-001 ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
     path3 = os.path.join(DATA_DIR, file3.filename)
@@ -228,11 +175,11 @@ async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, 
 # ---------------- Bot Ready ----------------
 @bot.event
 async def on_ready():
-    bot.add_view(PanelButtons())  # 永続ビュー
+    bot.add_view(PanelButtons())
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
     try:
         await bot.tree.sync()
-        print("✅ グローバルコマンド同期成功")
+        print("✅ コマンド同期成功")
     except Exception as e:
         print(f"❌ コマンド同期失敗: {e}")
     update_status.start()
