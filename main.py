@@ -234,9 +234,15 @@ class VdPanel(commands.Cog):
 # ---------------- Bot Ready ----------------
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
+    # 永続ビューを先に登録
     bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
+
+    # テスト用ならギルドIDを指定して同期
+    guild_id = 1313077923741438004  # テストサーバーIDに置き換え
+    guild = discord.Object(id=guild_id)
+    await bot.tree.sync(guild=guild)  # ギルド単位で即時反映
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
+
 
 # ---------------- Main ----------------
 keep_alive()
