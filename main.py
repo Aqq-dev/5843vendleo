@@ -116,7 +116,7 @@ class PurchaseModal(discord.ui.Modal):
                 try:
                     await m.send(embed=embed, view=view)
                     sent += 1
-                except:
+                except: 
                     continue
 
         await interaction.followup.send(f"購入希望を管理者に送信しました（{sent}人）", ephemeral=True)
@@ -197,13 +197,15 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            PurchaseModal(
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
+            view=PurchaseModal(
                 "小学生 (3個)" if self.values[0].startswith("小学生") else "詰め合わせパック(22個)",
                 "300円" if self.values[0].startswith("小学生") else "900円",
                 self.buyer, self.guild,
                 [self.file3] if self.values[0].startswith("小学生") else [self.file22]
-            )
+            ),
+            ephemeral=True
         )
 
 class ProductSelectView(discord.ui.View):
@@ -220,16 +222,16 @@ class PanelButtons(discord.ui.View):
 
     @discord.ui.button(label="🛒｜購入する", style=discord.ButtonStyle.success, custom_id="buy_button")
     async def buy(self, interaction, _):
-        # セレクトメニューは個人にだけ表示
-        await interaction.response.send_message(
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
             view=ProductSelectView(interaction.user, interaction.guild, self.file3, self.file22),
             ephemeral=True
         )
 
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
-        # 在庫確認も個人に表示
-        await interaction.response.send_message(
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(
             embed=discord.Embed(
                 title="在庫確認",
                 description="小学生 (3個) : ¥300 | 在庫 ∞\n詰め合わせパック(22個) : ¥900 | 在庫 ∞",
@@ -241,7 +243,6 @@ class PanelButtons(discord.ui.View):
 # ---------------- bot.tree.command ----------------
 @bot.tree.command(name="vd-panel-001")
 async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-    # パネル自体はサーバー上に表示（ephemeral=False）
     await interaction.response.defer(ephemeral=False)
     path3 = os.path.join(DATA_DIR, file3.filename)
     path22 = os.path.join(DATA_DIR, file22.filename)
