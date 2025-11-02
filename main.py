@@ -231,6 +231,7 @@ async def vd_panel(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     bot.add_view(PanelButtons())  # 永続ビュー
+    bot.add_view(PersistentPanelButtons())
     print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
     try:
         await bot.tree.sync()
