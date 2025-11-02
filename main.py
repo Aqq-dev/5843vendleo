@@ -2,7 +2,6 @@
 import os
 import uuid
 import discord
-from discord import app_commands
 from discord.ext import commands
 from flask import Flask
 from supabase import create_client, Client
@@ -117,12 +116,10 @@ class RejectModal(discord.ui.Modal):
         p = purchases.get(self.pid)
         if not p:
             return await interaction.response.send_message("購入情報なし", ephemeral=True)
-
         try:
             user = await bot.fetch_user(p["buyer_id"])
             await user.send(f"購入は拒否されました。\n理由:\n{self.reason.value}")
         except: pass
-
         supabase.table("purchase_logs").update({"status": "rejected", "rejected_reason": self.reason.value}).eq("id", self.pid).execute()
         await interaction.response.send_message("拒否し通知しました。", ephemeral=True)
 
@@ -159,7 +156,7 @@ class AdminActionView(discord.ui.View):
 
         channel = bot.get_channel(PURCHASE_LOG_CHANNEL_ID)
         if channel:
-            embed = discord.Embed(title="販売ログ", color=0xFFFFFF)
+            embed = discord.Embed(title="💹｜販売ログ", color=0xFFFFFF)
             embed.add_field(name="商品名", value=p['product'])
             embed.add_field(name="購入数", value="1個")
             embed.add_field(name="購入者", value=f"<@{p['buyer_id']}> ({p['buyer_id']})")
@@ -172,7 +169,7 @@ class AdminActionView(discord.ui.View):
 class ProductSelect(discord.ui.Select):
     def __init__(self, buyer, guild, file3, file22):
         options = [
-            discord.SelectOption(label="小学生 (3個)", description="値段: 300円"), 
+            discord.SelectOption(label="小学生 (3個)", description="値段: 300円"),
             discord.SelectOption(label="詰め合わせパック(22個)", description="値段: 900円"),
         ]
         super().__init__(options=options, placeholder="商品を選択してください", custom_id="product_select")
@@ -182,10 +179,10 @@ class ProductSelect(discord.ui.Select):
         self.file22 = file22
 
     async def callback(self, interaction):
-        if self.values[0] == "test3":
-            await interaction.response.send_modal(PurchaseModal("test3", "300円", self.buyer, self.guild, self.file3))
+        if self.values[0].startswith("小学生"):
+            await interaction.response.send_modal(PurchaseModal("小学生 (3個)", "300円", self.buyer, self.guild, self.file3))
         else:
-            await interaction.response.send_modal(PurchaseModal("test22", "900円", self.buyer, self.guild, self.file22))
+            await interaction.response.send_modal(PurchaseModal("詰め合わせパック(22個)", "900円", self.buyer, self.guild, self.file22))
 
 class ProductSelectView(discord.ui.View):
     def __init__(self, user, guild, file3, file22):
@@ -208,49 +205,39 @@ class PanelButtons(discord.ui.View):
     @discord.ui.button(label="🔍｜在庫確認", style=discord.ButtonStyle.primary, custom_id="stock_button")
     async def stock(self, interaction, _):
         embed = discord.Embed(title="在庫確認", color=0xFFFFFF)
-        embed.add_field(name="小学生 (3個)", value="価格: ¥300 | 在庫数: ∞") 
-        embed.add_field(name="詰め合わせパック(22個)", value="価格: ¥900 | 在庫数: ∞")
+        embed.add_field(name="小学生 (3個)", value="価格: `¥300` | 在庫数: ∞")
+        embed.add_field(name="詰め合わせパック(22個)", value="価格: `¥900` | 在庫数: ∞")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ---------------- Slash Command ----------------
-class VdPanel(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+# ---------------- bot.tree.command ----------------
+@bot.tree.command(name="vd-panel-001")
+async def vd_panel(interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
+    path3 = os.path.join(DATA_DIR, file3.filename)
+    path22 = os.path.join(DATA_DIR, file22.filename)
+    await file3.save(path3)
+    await file22.save(path22)
 
-    @app_commands.command(name="vd-panel-001")
-    async def panel(self, interaction: discord.Interaction, file3: discord.Attachment, file22: discord.Attachment):
-        path3 = os.path.join(DATA_DIR, file3.filename)
-        path22 = os.path.join(DATA_DIR, file22.filename)
-        await file3.save(path3)
-        await file22.save(path22)
+    embed = discord.Embed(title="🔞｜PAYPAY半自販機", description="下記ボタンを押して購入してください", color=0xFFFFFF)
+    embed.set_author(name="半自販機パネル", icon_url=AUTHOR_ICON_URL)
+    embed.set_footer(text="<@1434213209795199006> からのDMを許可してください")
+    embed.add_field(name="小学生 (3個)", value="値段: 300円")
+    embed.add_field(name="詰め合わせパック(22個)", value="値段: 900円")
+    await interaction.response.send_message(embed=embed, view=PanelButtons(path3, path22))
 
-        embed = discord.Embed(title="🔞PAYPAY半自販機", description="下記ボタンを押して購入してください", color=0xFFFFFF) 
-        embed.set_author(name="半自販機パネル", icon_url=AUTHOR_ICON_URL) 
-        embed.set_footer(text="<@1434213209795199006> からのDMを許可してください")
-        embed.add_field(name="小学生 (3個)", value="```値段: 300円```") 
-        embed.add_field(name="詰め合わせパック(22個)", value="```値段: 900円```")
-        await interaction.response.send_message(embed=embed, view=PanelButtons(path3, path22))
-
-async def main():
-    async with bot:
-        # Cog 登録
-        await bot.add_cog(VdPanel(bot))
-
-        # 永続ビュー登録
-        bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
-
-        # ギルド同期（テスト用）
-        guild_id = 1313077923741438004
+# ---------------- Bot Ready ----------------
+@bot.event
+async def on_ready():
+    bot.add_view(PanelButtons("dummy1.zip", "dummy2.zip"))
+    print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
+    # コマンド同期
+    try:
+        guild_id = 1313077923741438004  # テストサーバーID
         guild = discord.Object(id=guild_id)
         await bot.tree.sync(guild=guild)
-        print(f"✅ Bot Ready: {bot.user} / ID: {bot.user.id}")
+        print("✅ コマンド同期成功")
+    except Exception as e:
+        print(f"❌ コマンド同期失敗: {e}")
 
-        # Bot 起動
-        await bot.start(BOT_TOKEN)
-
-# keep_alive は Render 用
+# ---------------- Main ----------------
 keep_alive()
-
-import asyncio
-asyncio.run(main())
-
+bot.run(BOT_TOKEN)
